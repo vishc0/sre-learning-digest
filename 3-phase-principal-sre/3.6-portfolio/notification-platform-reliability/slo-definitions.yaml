@@ -1,0 +1,188 @@
+# slo-definitions.yaml
+# Format: Sloth v0.11+ (https://sloth.dev)
+# Platform: T-Mobile Notification Platform
+# Datasource: Prometheus (fed from OTel Collector sidecars)
+# Coverage: SMS delivery, Push delivery, API availability
+#
+# HOW TO READ THIS FILE:
+#   Each SLO has an "objective" (the target %) and "slis" (the signals that measure it).
+#   "error_ratio" means: bad_events / total_events.
+#   "time_window" of 30d means the budget resets monthly.
+#   Labels propagate to all generated recording rules and alerts.
+#
+# DEPLOY:
+#   sloth generate -i slo-definitions.yaml | kubectl apply -f -
+#   This produces PrometheusRule CRDs with burn rate alert groups.
+
+version: "prometheus/v1"
+service: "notification-platform"
+labels:
+  team: "sre-notification"
+  tier: "platform"
+  cost_center: "engineering"
+
+slos:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SLO 1: SMS Delivery Success Rate
+  #
+  # WHY THIS SLO:
+  #   SMS is the highest-trust notification channel. Fraud alerts, 2FA codes,
+  #   and emergency alerts all route through SMS. A miss here has direct
+  #   regulatory and customer-trust consequences.
+  #
+  # WHAT "SUCCESS" MEANS:
+  #   A message is "successful" when downstream carrier ACKs delivery within
+  #   the configured TTL (300s for high-priority, 3600s for standard).
+  #   Carrier-side failures beyond our control (e.g., number portability lag)
+  #   are excluded via the "carrier_fault=false" label filter.
+  #
+  # SLO TARGET: 99.5% — leaves 0.5% error budget = ~3.6 hours/month of
+  #   acceptable failure time, or ~43,200 failed messages/day at 25M/day load.
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "sms-delivery-success-rate"
+    description: >
+      At least 99.5% of SMS messages submitted to the platform must receive
+      a carrier delivery acknowledgement within TTL. Carrier-attributed failures
+      (carrier_fault=true) are excluded from error budget consumption.
+    objective: 99.5
+    sli:
+      events:
+        error_query: >
+          sum(rate(notification_sms_delivery_total{
+            status="failed",
+            carrier_fault="false"
+          }[{{.window}}]))
+        total_query: >
+          sum(rate(notification_sms_delivery_total{
+            carrier_fault="false"
+          }[{{.window}}]))
+    alerting:
+      name: "SMSDeliveryBurnRate"
+      labels:
+        severity: "critical"
+        channel: "sms"
+        pagerduty_service: "notification-platform-p1"
+      annotations:
+        summary: "SMS delivery SLO burn rate exceeded threshold"
+        runbook: "https://wiki.internal/runbooks/notification/high-burn-rate"
+        dashboard: "https://grafana.internal/d/notif-slo/notification-platform-slo"
+      page_alert:
+        labels:
+          severity: "critical"
+      ticket_alert:
+        labels:
+          severity: "warning"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SLO 2: Push Notification Delivery Latency (P95)
+  #
+  # WHY THIS SLO:
+  #   Push is volume-dominant (60% of all notifications). Latency matters more
+  #   than raw delivery rate for push because mobile OS rate-limiting means
+  #   a slow push is often a dropped push from the user's perspective.
+  #   Marketing and transactional push have different latency tolerances.
+  #
+  # WHAT "SUCCESS" MEANS:
+  #   95% of high-priority push notifications must be handed to FCM/APNs
+  #   within 2000ms of receipt by the consumer pod. This measures our
+  #   platform latency — not end-to-end to device (carrier/OS not in scope).
+  #
+  # SLO TARGET: 99.0%
+  #   Leaves 1.0% error budget = ~7.2 hours/month where p95 latency may
+  #   exceed 2000ms. Gives headroom for planned deployments and traffic spikes.
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "push-delivery-latency-p95"
+    description: >
+      95th percentile push notification handoff latency to FCM/APNs must be
+      under 2000ms for at least 99.0% of measurement windows. Applies to
+      high-priority push only (priority=high label). Marketing bulk push
+      (priority=bulk) is excluded — governed by a separate OLA.
+    objective: 99.0
+    sli:
+      events:
+        error_query: >
+          sum(rate(notification_push_handoff_duration_seconds_bucket{
+            le="2.0",
+            priority="high"
+          }[{{.window}}])) /
+          sum(rate(notification_push_handoff_duration_seconds_count{
+            priority="high"
+          }[{{.window}}]))
+          < bool 0.95
+        total_query: >
+          count_over_time(
+            (notification_push_handoff_duration_seconds_count{priority="high"})[{{.window}}:]
+          )
+    alerting:
+      name: "PushLatencyBurnRate"
+      labels:
+        severity: "critical"
+        channel: "push"
+        pagerduty_service: "notification-platform-p1"
+      annotations:
+        summary: "Push latency SLO burn rate exceeded threshold"
+        runbook: "https://wiki.internal/runbooks/notification/high-burn-rate"
+        dashboard: "https://grafana.internal/d/notif-slo/notification-platform-slo"
+      page_alert:
+        labels:
+          severity: "critical"
+      ticket_alert:
+        labels:
+          severity: "warning"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SLO 3: Notification API Availability
+  #
+  # WHY THIS SLO:
+  #   Upstream systems (CRM, billing, campaign manager) call our API to submit
+  #   notifications. If the API is unavailable or returns 5xx, the upstream
+  #   system cannot retry reliably — it must persist the intent and re-call,
+  #   which creates cascading delays across all channels.
+  #   This SLO protects upstream trust in the platform contract.
+  #
+  # WHAT "SUCCESS" MEANS:
+  #   Any HTTP request to /v1/notifications that returns 2xx or 4xx is
+  #   "successful" from an availability perspective. 4xx is the caller's
+  #   fault — the platform served them correctly. 5xx is a platform failure.
+  #   Excludes health check endpoints (/health, /ready).
+  #
+  # SLO TARGET: 99.9%
+  #   This is the tightest SLO — API availability is directly contractual
+  #   with upstream teams. 0.1% budget = ~43.8 minutes/month.
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: "notification-api-availability"
+    description: >
+      The notification submission API (/v1/notifications) must return non-5xx
+      responses for at least 99.9% of requests. Health check endpoints are
+      excluded. This SLO is contractual with upstream CRM and billing systems.
+    objective: 99.9
+    sli:
+      events:
+        error_query: >
+          sum(rate(http_requests_total{
+            job="notification-api",
+            status=~"5..",
+            path!~"/health|/ready|/metrics"
+          }[{{.window}}]))
+        total_query: >
+          sum(rate(http_requests_total{
+            job="notification-api",
+            path!~"/health|/ready|/metrics"
+          }[{{.window}}]))
+    alerting:
+      name: "NotificationAPIAvailabilityBurnRate"
+      labels:
+        severity: "critical"
+        channel: "api"
+        pagerduty_service: "notification-platform-p1"
+      annotations:
+        summary: "Notification API availability SLO burn rate exceeded threshold"
+        runbook: "https://wiki.internal/runbooks/notification/high-burn-rate"
+        dashboard: "https://grafana.internal/d/notif-slo/notification-platform-slo"
+      page_alert:
+        labels:
+          severity: "critical"
+      ticket_alert:
+        labels:
+          severity: "warning"

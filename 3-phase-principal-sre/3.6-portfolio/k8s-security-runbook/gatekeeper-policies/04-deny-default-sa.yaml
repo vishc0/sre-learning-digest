@@ -1,0 +1,44 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sdenydefa
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sDenyDefaultSA
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sdenydefa
+
+        # Warn if pod uses default ServiceAccount
+        violation[{"msg": msg}] {
+          pod := input.review.object
+          sa := pod.spec.serviceAccountName
+          sa == "default"
+          msg := sprintf("Pod %v should not use default ServiceAccount", [pod.metadata.name])
+        }
+
+        # Warn if automountServiceAccountToken is true
+        violation[{"msg": msg}] {
+          pod := input.review.object
+          pod.spec.automountServiceAccountToken == true
+          msg := sprintf("Pod %v should disable automountServiceAccountToken", [pod.metadata.name])
+        }
+
+---
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sDenyDefaultSA
+metadata:
+  name: deny-default-sa
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+  enforcementAction: audit  # warn-mode: audit (warn) not deny
+

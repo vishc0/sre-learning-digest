@@ -1,0 +1,300 @@
+{
+  "__comment": "Grafana 10.x compatible dashboard JSON. Import via Grafana UI: Dashboards > Import > paste JSON.",
+  "__datasource_note": "Replace 'YOUR_PROMETHEUS_DATASOURCE_UID' with your actual Prometheus datasource UID from Grafana > Configuration > Data Sources.",
+  "__deploy_note": "This dashboard assumes metrics are exported from OTel Collector to Prometheus. Metric names match slo-definitions.yaml.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+        "enable": true,
+        "expr": "changes(kube_deployment_status_replicas_updated{namespace='notification'}[2m]) > 0",
+        "hide": false,
+        "iconColor": "blue",
+        "name": "Deployments",
+        "step": "60s",
+        "titleFormat": "Deployment",
+        "type": "graph"
+      }
+    ]
+  },
+  "description": "SLO burn rate dashboard for the T-Mobile Notification Platform. Covers SMS delivery, push latency, and API availability across a 30-day rolling window.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "doc",
+      "title": "Runbook: High Burn Rate",
+      "tooltip": "Open the high burn rate runbook",
+      "type": "link",
+      "url": "https://wiki.internal/runbooks/notification/high-burn-rate"
+    },
+    {
+      "icon": "doc",
+      "title": "Error Budget Policy",
+      "tooltip": "Open the error budget policy",
+      "type": "link",
+      "url": "https://wiki.internal/policy/notification/error-budget"
+    }
+  ],
+  "panels": [
+
+    {
+      "__comment": "PANEL 1: Error Budget Remaining — the single most important number on the dashboard.",
+      "__why": "Hiring managers and engineering leadership want one number: how much budget is left. This stat panel gives it at a glance with thresholds that match the error budget policy (50%, 25%, 0%).",
+      "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 25 },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 75 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "text": {}
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "(\n  1 - (\n    sum(increase(notification_sms_delivery_total{status='failed',carrier_fault='false'}[30d]))\n    /\n    sum(increase(notification_sms_delivery_total{carrier_fault='false'}[30d]))\n  )\n) / (1 - 0.995) * 100",
+          "legendFormat": "SMS Delivery Budget",
+          "refId": "A"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "(\n  1 - (\n    sum(increase(http_requests_total{job='notification-api',status=~'5..',path!~'/health|/ready|/metrics'}[30d]))\n    /\n    sum(increase(http_requests_total{job='notification-api',path!~'/health|/ready|/metrics'}[30d]))\n  )\n) / (1 - 0.999) * 100",
+          "legendFormat": "API Availability Budget",
+          "refId": "B"
+        }
+      ],
+      "title": "Error Budget Remaining (30d Rolling)",
+      "type": "gauge"
+    },
+
+    {
+      "__comment": "PANEL 2: Burn Rate Time Series — shows whether burn is accelerating or recovering.",
+      "__why": "A single burn rate number is not enough. You need to see the trend. A burn rate of 3.0 dropping to 1.5 over 2 hours is recovery. A burn rate of 1.5 rising to 3.0 is escalation. This panel shows the difference.",
+      "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "Burn Rate (1.0 = normal)",
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rate(notification_sms_delivery_total{status='failed',carrier_fault='false'}[1h])) / sum(rate(notification_sms_delivery_total{carrier_fault='false'}[1h])) / (1 - 0.995)",
+          "legendFormat": "SMS Delivery (1h burn)",
+          "refId": "A"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rate(notification_sms_delivery_total{status='failed',carrier_fault='false'}[6h])) / sum(rate(notification_sms_delivery_total{carrier_fault='false'}[6h])) / (1 - 0.995)",
+          "legendFormat": "SMS Delivery (6h burn)",
+          "refId": "B"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rate(http_requests_total{job='notification-api',status=~'5..',path!~'/health|/ready|/metrics'}[1h])) / sum(rate(http_requests_total{job='notification-api',path!~'/health|/ready|/metrics'}[1h])) / (1 - 0.999)",
+          "legendFormat": "API Availability (1h burn)",
+          "refId": "C"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rate(http_requests_total{job='notification-api',status=~'5..',path!~'/health|/ready|/metrics'}[6h])) / sum(rate(http_requests_total{job='notification-api',path!~'/health|/ready|/metrics'}[6h])) / (1 - 0.999)",
+          "legendFormat": "API Availability (6h burn)",
+          "refId": "D"
+        }
+      ],
+      "title": "SLO Burn Rate (1h and 6h windows)",
+      "type": "timeseries"
+    },
+
+    {
+      "__comment": "PANEL 3: RabbitMQ Queue Depth by Queue — early warning for DLQ buildup.",
+      "__why": "Queue depth is the earliest leading indicator of downstream problems. A DLQ growing from 0 to 500 in 10 minutes means consumers are failing silently. Catching this before the SLO burns is the difference between a 5-minute fix and a 2-hour incident.",
+      "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "Messages in Queue",
+            "drawStyle": "line",
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 5000 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "rabbitmq_queue_messages{queue=~'sms.*|push.*|email.*',vhost='notification'}",
+          "legendFormat": "{{queue}} (ready)",
+          "refId": "A"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "rabbitmq_queue_messages{queue=~'.*dlq.*',vhost='notification'}",
+          "legendFormat": "DLQ: {{queue}}",
+          "refId": "B"
+        }
+      ],
+      "title": "RabbitMQ Queue Depth — All Queues + DLQs",
+      "type": "timeseries"
+    },
+
+    {
+      "__comment": "PANEL 4: Consumer Pod Throughput vs. Queue Depth — shows whether consumers are keeping up.",
+      "__why": "Queue depth alone is misleading. A queue of 50,000 messages is fine if consumers are processing 10,000/second. This panel overlays consume rate against queue depth so the on-call engineer can instantly see whether the queue is draining (good) or accumulating (bad).",
+      "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2
+          },
+          "unit": "msgps"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Queue Depth" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rate(notification_messages_processed_total{channel=~'sms|push'}[2m])) by (channel)",
+          "legendFormat": "{{channel}} consume rate (msg/s)",
+          "refId": "A"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rabbitmq_queue_messages{queue=~'sms.*|push.*',vhost='notification',queue!~'.*dlq.*'})",
+          "legendFormat": "Queue Depth",
+          "refId": "B"
+        },
+        {
+          "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+          "expr": "sum(rate(notification_messages_processed_total{status='failed',channel=~'sms|push'}[2m])) by (channel)",
+          "legendFormat": "{{channel}} failure rate (msg/s)",
+          "refId": "C"
+        }
+      ],
+      "title": "Consumer Throughput vs. Queue Depth",
+      "type": "timeseries"
+    }
+
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["slo", "notification", "sre", "reliability"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": "YOUR_PROMETHEUS_DATASOURCE_UID",
+        "definition": "label_values(notification_sms_delivery_total, environment)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Environment",
+        "multi": false,
+        "name": "environment",
+        "options": [],
+        "query": "label_values(notification_sms_delivery_total, environment)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["30s", "1m", "5m", "15m", "1h"]
+  },
+  "timezone": "browser",
+  "title": "Notification Platform — SLO Burn Rate",
+  "uid": "notif-slo-v2",
+  "version": 2
+}

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:jobs.apple.com)",
+      "WebFetch(domain:simplify.jobs)",
+      "WebFetch(domain:www.themuse.com)",
+      "WebFetch(domain:www.linkedin.com)",
+      "WebFetch(domain:www.zoominfo.com)",
+      "WebFetch(domain:job-boards.greenhouse.io)",
+      "WebFetch(domain:jobs.lever.co)",
+      "WebFetch(domain:jobs.ashbyhq.com)",
+      "WebFetch(domain:boards.greenhouse.io)",
+      "WebFetch(domain:www.builtinaustin.com)"
+    ]
+  }
+}

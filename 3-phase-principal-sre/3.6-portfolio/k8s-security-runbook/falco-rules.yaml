@@ -1,0 +1,144 @@
+# Falco Rules — K8s Security Detection
+
+# Includes 8 detection rules covering:
+# - Syscall-level anomalies (shell spawn, IMDS access, cryptomining)
+# - K8s audit log events (RBAC changes, secret reads)
+# - Supply chain indicators (unsigned image, known-bad digest)
+
+rules:
+
+# Rule 1: Shell Spawning in Container
+- rule: Shell_Spawn_In_Container
+  desc: Detects /bin/sh or /bin/bash spawning inside a container
+  condition: >
+    spawned_process and
+    container and
+    proc.name in (sh, bash, ksh) and
+    proc.parent.name not in (sh, bash, docker, containerd)
+  output: >
+    Alert: Shell spawned in container
+    (user=%user.name command=%proc.cmdline container_id=%container.id image=%container.image.repository)
+  priority: WARNING
+  tags: [container_escape, mitre_execution]
+
+# Rule 2: Process Execution in Sensitive Paths
+- rule: Sensitive_Executable_From_Container
+  desc: Suspicious executables run from inside container
+  condition: >
+    spawned_process and
+    container and
+    proc.exe in (/bin/nc, /bin/ncat, /usr/bin/curl, /usr/bin/wget) and
+    not proc_is_parent_script()
+  output: >
+    Alert: Suspicious process in container
+    (user=%user.name command=%proc.cmdline container=%container.name)
+  priority: WARNING
+  tags: [container_escape, command_execution]
+
+# Rule 3: IMDS Metadata Service Access (AWS)
+- rule: IMDS_Access_From_Container
+  desc: Container accessing AWS IMDS (169.254.169.254:80)
+  condition: >
+    outbound and
+    container and
+    fd.sip = "169.254.169.254" and
+    fd.sport = 80
+  output: >
+    Alert: IMDS access from container
+    (container=%container.name dest_ip=%fd.sip dest_port=%fd.sport)
+  priority: CRITICAL
+  tags: [credential_access, cloud_metadata]
+
+# Rule 4: Cryptominer Process
+- rule: Cryptominer_Detection
+  desc: Detects known cryptomining process names
+  condition: >
+    spawned_process and
+    container and
+    proc.name in (xmrig, monero, stratum, xmr-stak)
+  output: >
+    Alert: Cryptominer process detected
+    (user=%user.name process=%proc.name container=%container.name)
+  priority: CRITICAL
+  tags: [cryptomining, resource_exploitation]
+
+# Rule 5: K8s Secret API Read (Audit Log)
+- rule: K8s_Secret_Read
+  desc: Detects "get secrets" API call from pod SA
+  condition: >
+    k8s_audit and
+    verb = "get" and
+    objectRef.resource = "secrets" and
+    user.username startswith "system:serviceaccount"
+  output: >
+    Alert: Secret API read
+    (user=%user.username namespace=%objectRef.namespace secret=%objectRef.name)
+  priority: WARNING
+  tags: [credential_access, k8s_api]
+
+# Rule 6: RBAC Cluster-Admin Binding (Audit Log)
+- rule: K8s_ClusterAdmin_Binding
+  desc: Detects creation of cluster-admin RoleBinding
+  condition: >
+    k8s_audit and
+    verb = "create" and
+    objectRef.resource = "clusterrolebindings" and
+    requestObject.roleRef.name = "cluster-admin"
+  output: >
+    Alert: Cluster-admin binding created
+    (user=%user.username binding=%objectRef.name)
+  priority: CRITICAL
+  tags: [privilege_escalation, k8s_rbac]
+
+# Rule 7: Unsigned Image Deployment
+- rule: Unsigned_Image_Deployed
+  desc: Detects pod using unsigned or invalid image digest
+  condition: >
+    k8s_audit and
+    verb = "create" and
+    objectRef.resource = "pods" and
+    requestObject.spec.containers[].image not contains "@sha256:"
+  output: >
+    Alert: Unsigned image deployed
+    (user=%user.username image=%requestObject.spec.containers[].image)
+  priority: WARNING
+  tags: [supply_chain, image_integrity]
+
+# Rule 8: Known-Bad Digest Detection
+- rule: Known_Bad_Digest_Detected
+  desc: Detects pod using known-compromised image digest
+  condition: >
+    k8s_audit and
+    objectRef.resource = "pods" and
+    requestObject.spec.containers[].image contains "sha256:d3f5a6b9c2e1f8"
+  output: >
+    Alert: Known-bad image digest detected
+    (user=%user.username image=%requestObject.spec.containers[].image)
+  priority: CRITICAL
+  tags: [supply_chain, backdoor]
+
+---
+
+# Falco Output Configuration
+
+outputs:
+  - file_output:
+      enabled: true
+      keep_alive: false
+      filename: /var/log/falco/alerts.log
+
+  - syslog_output:
+      enabled: true
+      facility: LOG_USER
+
+  - cloudwatch_logs:
+      enabled: true
+      log_group: /aws/eks/cluster/my-cluster/falco
+      log_stream: security-alerts
+
+  - webhook_output:
+      enabled: true
+      url: "https://your-siem.example.com/falco-webhook"
+      headers:
+        - "Authorization: Bearer YOUR_TOKEN"
+

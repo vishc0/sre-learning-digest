@@ -1,0 +1,5 @@
+# JPMorgan Chase — Pitch & Cover
+
+30-SEC: "Vishweshwar Chippa. I have banking SRE background from Wachovia/Wells Fargo, plus 10 years at T-Mobile running notification platforms at 25M msgs/day with 99.99% availability and zero compliance gaps. JPMorgan's customer notification infrastructure — account alerts, transaction confirmations — is operationally identical to what I manage. 15-person team. Approved I-140 — your 99% H1B approval rate plus my I-140 makes this the simplest transfer possible."
+
+COVER: Dear JPMorgan Chase, My operational profile combines two things you need: financial services domain experience (Wachovia/Wells Fargo Operations Lead during their merger) and enterprise-scale notification platform reliability (T-Mobile, 25M messages daily, 99.99% availability, full compliance audit trails). Your Plano campus is building out exactly the kind of SRE organization I've been running for 10 years. I have an approved I-140 — with JPMorgan's 99% H1B approval rate, this is the cleanest transfer scenario available. Vishweshwar Chippa

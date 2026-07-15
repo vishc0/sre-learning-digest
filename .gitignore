@@ -1,0 +1,11 @@
+# Excluded — contains sensitive platform data (credentials, queue configs, internal notes)
+dnd-platform/
+
+# Claude local settings (project-specific, not shared)
+.claude/settings.local.json
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*~

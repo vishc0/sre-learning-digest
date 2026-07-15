@@ -1,0 +1,55 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sdenyclusteradminsa
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sDenyClusterAdminSA
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            exemptServiceAccounts:
+              type: array
+              items:
+                type: string
+              description: "Service accounts exempt from check (e.g., 'system:admin')"
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sdenyclusteradminsa
+
+        # Violation: ServiceAccount has cluster-admin binding
+        violation[{"msg": msg}] {
+          input.review.kind.kind == "ClusterRoleBinding"
+          binding := input.review.object
+          binding.roleRef.name == "cluster-admin"
+          subject := binding.subjects[_]
+          subject.kind == "ServiceAccount"
+          not is_exempt(subject.name)
+          msg := sprintf("ServiceAccount %v/%v cannot be bound to cluster-admin", [subject.namespace, subject.name])
+        }
+
+        is_exempt(sa) {
+          exempts := input.parameters.exemptServiceAccounts[_]
+          sa == exempts
+        }
+
+---
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sDenyClusterAdminSA
+metadata:
+  name: deny-cluster-admin-sa
+spec:
+  match:
+    kinds:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        kinds: ["ClusterRoleBinding"]
+  parameters:
+    exemptServiceAccounts:
+      - "system:kube-admin"
+  enforcementAction: deny
+

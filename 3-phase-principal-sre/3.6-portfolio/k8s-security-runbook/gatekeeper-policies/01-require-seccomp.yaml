@@ -1,0 +1,77 @@
+# Gatekeeper Policy 01: Require seccomp Profile
+
+# ConstraintTemplate: Defines OPA Rego logic for seccomp validation
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredseccomp
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredSeccomp
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            allowedProfiles:
+              type: array
+              items:
+                type: string
+              description: "List of allowed seccomp profiles (e.g., 'runtime/default', 'localhost/my-profile')"
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredseccomp
+
+        # Violation if pod lacks seccomp AND seccomp is missing
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not has_seccomp(container)
+          msg := sprintf("Container %v must have seccomp profile defined", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not has_seccomp(container)
+          msg := sprintf("InitContainer %v must have seccomp profile defined", [container.name])
+        }
+
+        # Violation if seccomp profile is not in allowed list
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          profile := get_seccomp_profile(container)
+          profile != ""
+          allowed := input.parameters.allowedProfiles[_]
+          profile != allowed
+          msg := sprintf("Container %v seccomp profile %v not in allowed list", [container.name, profile])
+        }
+
+        has_seccomp(container) {
+          container.securityContext.seccompProfile != null
+        }
+
+        get_seccomp_profile(container) = profile {
+          profile := container.securityContext.seccompProfile.type
+        }
+
+---
+
+# Constraint: Enforcement rule (deny mode)
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredSeccomp
+metadata:
+  name: require-seccomp-all-pods
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+  parameters:
+    allowedProfiles:
+      - "runtime/default"
+      - "localhost/my-custom-profile"
+  enforcementAction: deny  # Enforcement mode: deny (block) or audit (warn)
+

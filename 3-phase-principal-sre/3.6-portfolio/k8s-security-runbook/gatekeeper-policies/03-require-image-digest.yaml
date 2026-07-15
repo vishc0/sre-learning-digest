@@ -1,0 +1,49 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredimagedigest
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredImageDigest
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            allowedRegistries:
+              type: array
+              items:
+                type: string
+              description: "Allowed image registries"
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredimagedigest
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          image := container.image
+          not is_digest_format(image)
+          msg := sprintf("Container %v must use image with @sha256 digest, not tag: %v", [container.name, image])
+        }
+
+        is_digest_format(image) {
+          contains(image, "@sha256:")
+        }
+
+---
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredImageDigest
+metadata:
+  name: require-image-digest-all
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+  enforcementAction: deny
+

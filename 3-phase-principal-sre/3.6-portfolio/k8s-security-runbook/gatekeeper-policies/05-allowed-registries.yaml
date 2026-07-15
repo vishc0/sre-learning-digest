@@ -1,0 +1,84 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedregistries
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRegistries
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            allowedRegistries:
+              type: array
+              items:
+                type: string
+              description: "List of allowed image registries"
+            deniedRegistries:
+              type: array
+              items:
+                type: string
+              description: "List of denied image registries"
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedregistries
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          image := container.image
+          registry := get_registry(image)
+          is_denied(registry)
+          msg := sprintf("Container %v uses denied registry %v", [container.name, registry])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          image := container.image
+          registry := get_registry(image)
+          allowed := input.parameters.allowedRegistries[_]
+          registry != allowed
+          msg := sprintf("Container %v registry %v not in allowed list", [container.name, registry])
+        }
+
+        get_registry(image) = registry {
+          parts := split(image, "/")
+          count(parts) > 1
+          registry := parts[0]
+        }
+
+        get_registry(image) = "docker.io" {
+          parts := split(image, "/")
+          count(parts) == 1
+        }
+
+        is_denied(registry) {
+          denied := input.parameters.deniedRegistries[_]
+          registry == denied
+        }
+
+---
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRegistries
+metadata:
+  name: allowed-registries
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+  parameters:
+    allowedRegistries:
+      - "docker.io/myrepo"
+      - "ecr.aws/myaccount"
+      - "gcr.io/myproject"
+    deniedRegistries:
+      - "docker.io"  # Only allow specific namespaces in docker.io
+      - "quay.io"
+  enforcementAction: deny
+
